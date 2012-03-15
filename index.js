@@ -1,26 +1,66 @@
-var lessFiles = __dirname + '/less_files'
-  , cssFiles = __dirname + '/css_files';
+var lessDir = __dirname + '/less_files'
+  , cssDir = __dirname + '/css_files';
 
 var less = require('less')
-  , fs = require('fs');
+  , LessParser = less.Parser
 
-var onModify = function(filename){
-  var lessCss = fs.readFileSync(lessFiles + '/' + filename).toString();
-  less.render(lessCss, function(err, css) {
-    var newFilename = cssFiles + '/' + filename.replace(/\.less$/, '.css');
-    fs.writeFileSync(newFilename, css);
+  , path = require('path')
+  , join = path.join
+
+  , fs = require('fs')
+  , onModify
+  , relations = {}
+  , watch;
+
+
+onModify = function(filename){
+  console.log('Changed', filename);
+  if(relations[filename])
+    filename = relations[filename];
+  console.log('Which relate on', filename);
+  var path, lessParser, contents;
+
+  path = join(lessDir, filename);
+  if(!filename.match(/\.less$/) || !fs.statSync(path).isFile())
+    return;
+
+  lessParser = new LessParser({
+    paths: [ lessDir ],
+    filename: filename
+  });
+
+  contents = fs.readFileSync(path).toString();
+  lessParser.parse(contents, function(err, tree){
+    if(err)
+      throw new Error(err);
+
+    var cssFilename = filename.replace(/less$/, 'css');
+    fs.writeFileSync(join(cssDir, cssFilename), tree.toCSS());
+    // Relations
+    tree.rules.forEach(function(rule){
+      if(rule.path){
+        watch(rule.path);
+        relations[rule.path] = filename;
+      }
+    });
+  });
+
+}
+
+watch = function(filename){
+  if(relations[filename])
+    return;
+
+  var path;
+  if(filename.charAt(0) == '/')
+    path = filename;
+  else
+    path = join(lessDir, filename);
+
+  fs.watch(path, function(){
+    onModify(filename);
   });
 }
 
-var watchList = fs.readdirSync(lessFiles); // Array with `less_files` dir contents
-
-watchList.filter(function(path){
-  return path.match(/\.less$/); // Filter not .less files
-}).forEach(function(path){
-  console.log('Watching', path);
-  fs.watch(lessFiles + '/' + path, function(event, filename){
-    if(filename){
-      onModify(filename);
-    }
-  });
-});
+fs.readdirSync(lessDir).forEach(onModify);
+watch(lessDir);
